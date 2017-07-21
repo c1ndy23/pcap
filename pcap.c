@@ -8,12 +8,58 @@
 #include <netinet/if_ether.h>
 #include <net/ethernet.h>
 #include <netinet/ether.h>
-#include <string.h>
+#include <stdint.h>
+#include <iconv.h>
 
-void print_ether_header(const unsigned char *packet);
-int print_ip_header(const unsigned char *packet);
-int print_tcp_header(const unsigned char *packet);
-void print_data(const unsigned char *packet);
+        #define ETHER_ADDR_LEN  6
+
+
+        struct sniff_ethernet {
+                u_char ether_dhost[ETHER_ADDR_LEN]; 
+                u_char ether_shost[ETHER_ADDR_LEN]; 
+                u_int16_t ether_type;
+        };
+
+        struct sniff_ip {
+                u_char ip_vhl;        
+                u_char ip_tos;        
+                u_int16_t ip_len;       
+                u_int16_t ip_id;        
+                u_int16_t ip_off;       
+        #define IP_RF 0x8000          
+        #define IP_DF 0x4000          
+        #define IP_MF 0x2000          
+        #define IP_OFFMASK 0x1fff     
+                u_char ip_ttl;        
+                u_char ip_p;          
+                u_int16_t ip_sum;        
+                struct  in_addr ip_src, ip_dst;
+        };
+        #define IP_V(ip)                ((((ip)->ip_vhl) >> 4) & 0x0f)
+        #define IP_HL(ip)               (((ip)->ip_vhl) & 0x0f)
+
+        struct sniff_tcp {
+                u_int16_t th_sport;     
+                u_int16_t th_dport;     
+                u_int32_t th_seq;         
+                u_int32_t th_ack;          
+                u_char th_off;      
+         #define TH_OFF(th)      ((((th)->th_off) >> 4) & 0x0f)  
+                u_char th_flags;
+        #define TH_FIN 0x01
+        #define TH_SYN 0x02
+        #define TH_RST 0x04
+        #define TH_PUSH 0x08
+        #define TH_ACK 0x10
+        #define TH_URG 0x20
+        #define TH_ECE 0x40
+        #define TH_CWR 0x80
+        #define TH_FLAGS (TH_FIN|TH_SYN|TH_RST|TH_ACK|TH_URG|TH_ECE|TH_CWR)
+                u_int16_t th_win;         
+                u_int16_t th_sum;         
+                u_int16_t th_urp;         
+        };
+
 
 int main(int argc, char *argv[])
 {
@@ -26,20 +72,20 @@ int main(int argc, char *argv[])
         bpf_u_int32 net;                
         struct pcap_pkthdr *header;     
         const u_char *packet;           
+        unsigned char *user;
+        int i,j = 0;
         int offset = 0;
-        int len = 0;
+        int data_len = 0;
+        struct sockaddr_in sa;
+        char input[100];
+        char output[100];
+        unsigned short ether_type;
 
-        dev = pcap_lookupdev(errbuf);
-        if (dev == NULL) {
-                fprintf(stderr, "Couldn't find default device: %s\n", errbuf);
-                return(2);
-        }
+        struct sniff_ethernet *eh;
+        struct sniff_ip *ih;         
+        struct sniff_tcp *th;
 
-        if (pcap_lookupnet(dev, &net, &mask, errbuf) == -1) {
-                fprintf(stderr, "Couldn't get netmask for device %s: %s\n", dev, errbuf);
-                net = 0;
-                mask = 0;
-        }
+        dev = argv[1];
 
         handle = pcap_open_live(dev, BUFSIZ, 1, 0, errbuf);
         if (handle == NULL) {
@@ -51,6 +97,7 @@ int main(int argc, char *argv[])
                 fprintf(stderr, "Couldn't parse filter %s: %s\n", filter_exp, pcap_geterr(handle));
                 return(2);
         }
+
         if (pcap_setfilter(handle, &fp) == -1) {
                 fprintf(stderr, "Couldn't install filter %s: %s\n", filter_exp, pcap_geterr(handle));
                 return(2);
@@ -60,85 +107,66 @@ int main(int argc, char *argv[])
         {
                 if(pcap_next_ex(handle, &header, &packet))
                 {
-                        print_ether_header(packet);
-                        packet = packet + 14; 
-                        offset = print_ip_header(packet);
-                        packet = packet + offset;
-                        offset = print_tcp_header(packet);
-                        packet = packet + offset;   
-                        print_data(packet);
-                 }
+                    eh = (struct sniff_ethernet *)packet;
+                    ih = (struct sniff_ip *)(packet + 14);
+                    th = (struct sniff_tcp *)(packet + 14 + ((((ih)->ip_vhl) & 0x0f)*4));
+                    
+                    ether_type=ntohs(eh->ether_type); 
+
+                    if (ether_type!=0x0800)
+                    {
+                            printf("ether type wrong\n");
+                            return ;
+                    }
+
+                    printf("\n============ETHERNET HEADER============\n");
+                    printf("dst MAC Addr : ");
+                    for(i=0;i<5;i++)
+                            printf("%02x:", eh->ether_shost[i]); 
+                    printf("%02x\n", eh->ether_shost[i+1]);
+            
+                    printf("src MAC Addr : ");
+                    for(j=0;j<5;j++)
+                            printf("%02x:", eh->ether_dhost[j]);
+                    printf("%02x\n", eh->ether_dhost[j+1]);
+
+
+                    printf("\n============IP HEADER============\n");
+                    if(ih->ip_p == 0x06)
+                    {
+                            printf("Protocol : TCP\n");
+                    }
+                    //input = (ih->ip_src);
+                    printf("src IP : %s\n", inet_ntop(AF_INET, &(ih->ip_src), output, 100));
+                    //input = (ih->ip_dst);
+                    printf("dst IP : %s\n", inet_ntop(AF_INET, &(ih->ip_dst), output, 100));
+
+                    printf("\n============TCP HEADER============\n");
+                    printf("src port : %d\n", ntohs(th->th_sport) );
+                    printf("dst port : %d\n", ntohs(th->th_dport) );
+                    printf("\n");
+                    
+                    printf("\n============DATA============\n");
+                    offset = (((((ih)->ip_vhl) & 0x0f)*4) + (((((th)->th_off) >> 4) & 0x0f)*4));
+                    packet = (packet + 14 + offset);
+                    
+                    data_len = ((ih)->ip_len);
+                    
+                    data_len = (data_len - offset);
+                    
+                    for(i=(14 + offset);i<data_len;i++)
+                    {
+           
+                        if((*(packet+i)) >=32 && (*(packet+i)) <=128)
+                            printf("%c", *(packet+i));
+                        else 
+                            printf(".");
+                    }
+                    
+                }
                 continue;
-
-        }
-}
-
-void print_ether_header(const unsigned char *packet)
-{
-        int i,j = 0;
-        u_short ether_type; 
-        memcpy(&ether_type, packet+12, 2);
-        ether_type=ntohs(ether_type);
-
-        if (ether_type!=0x0800)
-        {
-                printf("ether type wrong\n");
-                return ;
         }
 
-        printf("\n============ETHERNET HEADER============\n");
-        printf("Dst MAC Addr : ");
-        for(i=0;i<5;i++)
-                printf("%02x:", packet[i]); 
-        printf("%02x\n", packet[i+1]);
-
-        printf("Src MAC Addr : ");
-        for(j=6;j<11;j++)
-                printf("%02x:", packet[j]);
-        printf("%02x\n", packet[j+1]);
-        printf("\n");
-}
-
-int print_ip_header(const unsigned char *packet)
-{
-        u_char version;
-        u_char ip_protocol;
-        struct in_addr ip_src;
-        struct in_addr ip_dst;
-        memcpy(&version, packet, 1);
-        memcpy(&ip_protocol, packet+10, 1);
-        memcpy(&ip_src, packet+12, 4);
-        memcpy(&ip_dst, packet+16, 4);
-
-        printf("\n============IP HEADER============\n");
-
-        if(ip_protocol == 0x06)
-                printf("Protocol : TCP\n");
-
-        printf("Src IP Addr : %s\n", inet_ntoa(ip_src) );
-        printf("Dst IP Addr : %s\n", inet_ntoa(ip_dst) );
-
-        return (version & 0x0f)*4; // header_length return
-}
-
-int print_tcp_header(const unsigned char *packet)
-{
-        u_short s_port;
-        u_short d_port;
-        u_char offset;
-        memcpy(&s_port, packet, 2);
-        memcpy(&d_port, packet+2, 2);
-        memcpy(&offset, packet+12 , 1);
-        printf("\n============TCP HEADER============\n");
-        printf("Src port number : %d\n", ntohs(s_port) );
-        printf("Dst port number : %d\n", ntohs(d_port) );
-        printf("\n");
- 
-        return ((offset >> 4) & 0x0f)*4;
-}
-
-void print_data(const unsigned char *data)
-{
-    printf("\n============DATA============\n");
-    printf("%s\n\n", data);
+        pcap_close(handle);
+        return 0;
 }
