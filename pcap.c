@@ -9,10 +9,8 @@
 #include <net/ethernet.h>
 #include <netinet/ether.h>
 #include <stdint.h>
-#include <iconv.h>
-
-        #define ETHER_ADDR_LEN  6
-
+#include <ctype.h>
+#define ETHER_ADDR_LEN  6
 
         struct sniff_ethernet {
                 u_char ether_dhost[ETHER_ADDR_LEN]; 
@@ -26,7 +24,7 @@
                 u_int16_t ip_len;       
                 u_int16_t ip_id;        
                 u_int16_t ip_off;       
-        #define IP_RF 0x8000          
+        #define IP 0x8000          
         #define IP_DF 0x4000          
         #define IP_MF 0x2000          
         #define IP_OFFMASK 0x1fff     
@@ -85,6 +83,12 @@ int main(int argc, char *argv[])
         struct sniff_ip *ih;         
         struct sniff_tcp *th;
 
+        if(argc <2)
+        {
+            printf("%s", "argc error\n");
+            return(2);
+        }
+
         dev = argv[1];
 
         handle = pcap_open_live(dev, BUFSIZ, 1, 0, errbuf);
@@ -113,7 +117,7 @@ int main(int argc, char *argv[])
                     
                     ether_type=ntohs(eh->ether_type); 
 
-                    if (ether_type!=0x0800)
+                    if (ether_type!=ETHERTYPE_IP)
                     {
                             printf("ether type wrong\n");
                             return ;
@@ -132,13 +136,12 @@ int main(int argc, char *argv[])
 
 
                     printf("\n============IP HEADER============\n");
-                    if(ih->ip_p == 0x06)
+                    if(ih->ip_p == IPPROTO_TCP)
                     {
                             printf("Protocol : TCP\n");
                     }
-                    //input = (ih->ip_src);
+               
                     printf("src IP : %s\n", inet_ntop(AF_INET, &(ih->ip_src), output, 100));
-                    //input = (ih->ip_dst);
                     printf("dst IP : %s\n", inet_ntop(AF_INET, &(ih->ip_dst), output, 100));
 
                     printf("\n============TCP HEADER============\n");
@@ -154,15 +157,20 @@ int main(int argc, char *argv[])
                     
                     data_len = (data_len - offset);
                     
-                    for(i=(14 + offset);i<data_len;i++)
+                    for(i=0;i<=data_len;i++)
                     {
-           
-                        if((*(packet+i)) >=32 && (*(packet+i)) <=128)
+                        if(isdigit(*(packet+i)))
                             printf("%c", *(packet+i));
                         else 
                             printf(".");
+                            
                     }
                     
+                }
+                else
+                {
+                    printf("%s", "packet can't read\n");
+                    return(2);
                 }
                 continue;
         }
